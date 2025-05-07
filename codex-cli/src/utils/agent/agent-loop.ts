@@ -8,6 +8,9 @@ import type {
 import type { ReasoningEffort } from "openai/resources.mjs";
 import type { Stream } from "openai/streaming.mjs";
 
+// Thêm import cho MCP client
+import { MCPClient, createMCPClient, MCPToolCall } from "../mcp-client";
+
 import { log, isLoggingEnabled } from "./log.js";
 import { OPENAI_TIMEOUT_MS } from "../config.js";
 import { parseToolCallArguments } from "../parsers.js";
@@ -57,6 +60,77 @@ export class AgentLoop {
   private instructions?: string;
   private approvalPolicy: ApprovalPolicy;
   private config: AppConfig;
+
+  // Thêm thuộc tính mcpClient cho class AgentLoop
+  private mcpClient: MCPClient | null = null;
+
+  /**
+   * Trả về danh sách tools bao gồm cả MCP tools và các tools mặc định
+   */
+  private getTools(): Array<{
+    type: "function";
+    function: {
+      name: string;
+      description: string;
+      parameters: any;
+    };
+  }> {
+    // Tools mặc định
+    const defaultTools = [
+      {
+        type: "function",
+        function: {
+          name: "shell",
+          description: "Runs a shell command, and returns its output.",
+          strict: false,
+          parameters: {
+            type: "object",
+            properties: {
+              command: { type: "array", items: { type: "string" } },
+              workdir: {
+                type: "string",
+                description: "The working directory for the command.",
+              },
+              timeout: {
+                type: "number",
+                description:
+                  "The maximum time to wait for the command to complete in milliseconds.",
+              },
+            },
+            required: ["command"],
+            additionalProperties: false,
+          },
+        },
+      },
+    ] as Array<{
+      type: "function";
+      function: {
+        name: string;
+        description: string;
+        parameters: any;
+      };
+    }>;
+
+    // Thêm MCP tools nếu có
+    if (this.mcpClient && this.mcpClient.isEnabled()) {
+      try {
+        const mcpTools = this.mcpClient.getOpenAITools();
+        if (mcpTools.length > 0) {
+          if (isLoggingEnabled()) {
+            log(`Adding ${mcpTools.length} MCP tools to the request`);
+          }
+          return [...defaultTools, ...mcpTools];
+        }
+      } catch (error) {
+        if (isLoggingEnabled()) {
+          log(`Error getting MCP tools: ${error}`);
+        }
+      }
+    }
+
+    // Trả về chỉ tools mặc định nếu không có MCP tools
+    return defaultTools;
+  }
 
   // Using `InstanceType<typeof OpenAI>` sidesteps typing issues with the OpenAI package under
   // the TS 5+ `moduleResolution=bundler` setup. OpenAI client instance. We keep the concrete
@@ -172,6 +246,17 @@ export class AgentLoop {
     }
     this.terminated = true;
 
+    // Dọn dẹp MCP client nếu tồn tại
+    if (this.mcpClient) {
+      try {
+        this.mcpClient.cleanup();
+      } catch (error) {
+        if (isLoggingEnabled()) {
+          log(`Error cleaning up MCP client: ${error}`);
+        }
+      }
+    }
+
     this.hardAbort.abort();
 
     this.cancel();
@@ -220,6 +305,18 @@ export class AgentLoop {
     this.getCommandConfirmation = getCommandConfirmation;
     this.onReset = onReset;
     this.sessionId = getSessionId() || randomUUID().replaceAll("-", "");
+    
+    // Khởi tạo MCP client nếu cấu hình tồn tại
+    if (this.config.mcp) {
+      this.mcpClient = createMCPClient(this.config.mcp);
+      if (isLoggingEnabled()) {
+        log(`MCP client initialized: ${this.mcpClient.isEnabled() ? "enabled" : "disabled"}`);
+      }
+    } else {
+      if (isLoggingEnabled()) {
+        log("MCP client not initialized due to missing config");
+      }
+    }
     // Configure OpenAI client with optional timeout (ms) from environment
     const timeoutMs = OPENAI_TIMEOUT_MS;
     const apiKey = this.config.apiKey;
@@ -340,6 +437,46 @@ export class AgentLoop {
 
     // used to tell model to stop if needed
     const additionalItems: Array<ChatCompletionMessageParam> = [];
+
+    // Kiểm tra xem có phải là MCP tool không
+    if (this.mcpClient && this.mcpClient.isEnabled() && name && name.includes(".")) {
+      // Tên của MCP tool có dạng serverName.toolName
+      if (isLoggingEnabled()) {
+        log(`Executing MCP tool: ${name}`);
+      }
+      
+      try {
+        const mcpToolCall: MCPToolCall = {
+          id: callId,
+          name: name,
+          arguments: rawArguments || "{}"
+        };
+        
+        const result = await this.mcpClient.executeToolCall(mcpToolCall);
+        
+        if (result.error) {
+          outputItem.content = JSON.stringify({ 
+            output: `Error executing MCP tool: ${result.error}`, 
+            metadata: { exit_code: 1, duration_seconds: 0 }
+          });
+        } else {
+          outputItem.content = JSON.stringify({ 
+            output: result.result,
+            metadata: { exit_code: 0, duration_seconds: 0 } 
+          });
+        }
+        
+        return [outputItem, ...additionalItems];
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        outputItem.content = JSON.stringify({ 
+          output: `Error executing MCP tool: ${errorMessage}`,
+          metadata: { exit_code: 1, duration_seconds: 0 }
+        });
+        
+        return [outputItem, ...additionalItems];
+      }
+    }
 
     // TODO: allow arbitrary function calls (beyond shell/container.exec)
     if (name === "container.exec" || name === "shell") {
@@ -508,34 +645,7 @@ export class AgentLoop {
                 ) as Array<ChatCompletionMessageParam>),
               ],
               reasoning_effort: reasoning,
-              tools: [
-                {
-                  type: "function",
-                  function: {
-                    name: "shell",
-                    description:
-                      "Runs a shell command, and returns its output.",
-                    strict: false,
-                    parameters: {
-                      type: "object",
-                      properties: {
-                        command: { type: "array", items: { type: "string" } },
-                        workdir: {
-                          type: "string",
-                          description: "The working directory for the command.",
-                        },
-                        timeout: {
-                          type: "number",
-                          description:
-                            "The maximum time to wait for the command to complete in milliseconds.",
-                        },
-                      },
-                      required: ["command"],
-                      additionalProperties: false,
-                    },
-                  },
-                },
-              ],
+              tools: this.getTools(),
             });
             break;
           } catch (error) {

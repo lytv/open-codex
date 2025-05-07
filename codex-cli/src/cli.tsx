@@ -22,6 +22,8 @@ import {
   loadConfig,
   PRETTY_PRINT,
   INSTRUCTIONS_FILEPATH,
+  loadMCPConfig,
+  saveMCPConfig,
 } from "./utils/config";
 import { createInputItem } from "./utils/input-utils";
 import { preloadModels } from "./utils/model-utils.js";
@@ -78,6 +80,11 @@ const cli = meow(
     -f, --full-context         Launch in "full-context" mode which loads the entire repository
                                into context and applies a batch of edits in one go. Incompatible
                                with all other flags, except for --model.
+
+  MCP Server Options
+    --mcp-enable               Enable MCP server integration
+    --mcp-disable              Disable MCP server integration
+    --mcp-config               Open the MCP configuration file in your editor
 
   Examples
     $ codex "Write and run a python program that prints ASCII art"
@@ -147,6 +154,20 @@ const cli = meow(
         description: `Run in full-context editing approach. The model is given the whole code
           directory as context and performs changes in one go without acting.`,
       },
+      
+      // MCP Server options
+      mcpEnable: {
+        type: "boolean",
+        description: "Enable MCP server integration",
+      },
+      mcpDisable: {
+        type: "boolean",
+        description: "Disable MCP server integration",
+      },
+      mcpConfig: {
+        type: "boolean",
+        description: "Open the MCP configuration file in your editor",
+      },
     },
   },
 );
@@ -200,6 +221,57 @@ if (cli.flags.config) {
     process.env["EDITOR"] || (process.platform === "win32" ? "notepad" : "vi");
   spawnSync(editor, [filePath], { stdio: "inherit" });
   process.exit(0);
+}
+
+// Handle MCP config flag: open MCP config file in editor and exit
+if (cli.flags.mcpConfig) {
+  const filePath = path.join(process.cwd(), "mcp.json");
+  const editor =
+    process.env["EDITOR"] || (process.platform === "win32" ? "notepad" : "vi");
+  spawnSync(editor, [filePath], { stdio: "inherit" });
+  process.exit(0);
+}
+
+// Handle MCP enable/disable flags
+if (cli.flags.mcpEnable || cli.flags.mcpDisable) {
+  const mcpConfig = loadMCPConfig(process.cwd());
+  
+  if (cli.flags.mcpEnable) {
+    // Kiểm tra xem có mcpServers nào định nghĩa chưa
+    if (!mcpConfig.mcpServers || Object.keys(mcpConfig.mcpServers).length === 0) {
+      // Nếu chưa có mcpServers nào, thêm một vài server mặc định để tham khảo
+      mcpConfig.mcpServers = {
+        "filesystem": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "D:\\"
+          ]
+        },
+        "desktop-commander": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@wonderwhy-er/desktop-commander"
+          ]
+        }
+      };
+    }
+    console.log("MCP server integration enabled. Config file updated.");
+  } else if (cli.flags.mcpDisable) {
+    // Để vô hiệu hóa MCP, chúng ta xóa phần mcpServers
+    mcpConfig.mcpServers = {};
+    console.log("MCP server integration disabled.");
+  }
+  
+  // Save the updated config
+  saveMCPConfig(mcpConfig, process.cwd());
+  
+  // If only enabling/disabling without a prompt, exit
+  if (!prompt) {
+    process.exit(0);
+  }
 }
 
 // ---------------------------------------------------------------------------

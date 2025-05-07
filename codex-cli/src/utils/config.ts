@@ -144,6 +144,17 @@ export function setApiKey(apiKey: string): void {
 // Formatting (quiet mode-only).
 export const PRETTY_PRINT = Boolean(process.env["PRETTY_PRINT"] || "");
 
+// Định nghĩa MCPServerConfig
+export interface MCPServerConfig {
+  command: string;
+  args: string[];
+}
+
+// Định nghĩa MCPConfig
+export type MCPConfig = {
+  mcpServers?: Record<string, MCPServerConfig>;
+};
+
 // Represents config as persisted in config.json.
 export type StoredConfig = {
   model?: string;
@@ -152,6 +163,7 @@ export type StoredConfig = {
   approvalMode?: AutoApprovalMode;
   fullAutoErrorMode?: FullAutoErrorMode;
   memory?: MemoryConfig;
+  mcp?: MCPConfig; // Thêm cấu hình MCP
 };
 
 // Minimal config written on first run.  An *empty* model string ensures that
@@ -176,7 +188,40 @@ export type AppConfig = {
   approvalMode?: AutoApprovalMode;
   fullAutoErrorMode?: FullAutoErrorMode;
   memory?: MemoryConfig;
+  mcp?: MCPConfig; // Thêm cấu hình MCP
 };
+
+// Giá trị mặc định cho MCP
+export const DEFAULT_MCP_CONFIG: MCPConfig = {
+  mcpServers: {}
+};
+
+// Đường dẫn đến file cấu hình MCP
+export const MCP_CONFIG_FILEPATH = (cwd: string) => join(cwd, "mcp.json");
+
+/**
+ * Đọc cấu hình MCP từ file mcp.json
+ * @param cwd Thư mục làm việc hiện tại
+ */
+export function loadMCPConfig(cwd: string): MCPConfig {
+  const mcpConfigPath = MCP_CONFIG_FILEPATH(cwd);
+  
+  if (existsSync(mcpConfigPath)) {
+    try {
+      const raw = readFileSync(mcpConfigPath, "utf-8");
+      const config = JSON.parse(raw) as MCPConfig;
+      return {
+        ...DEFAULT_MCP_CONFIG,
+        ...config,
+      };
+    } catch (error) {
+      // Log lỗi nhưng vẫn tiếp tục với cấu hình mặc định
+      console.error(`Error loading MCP config: ${error}`);
+    }
+  }
+  
+  return DEFAULT_MCP_CONFIG;
+}
 
 // ---------------------------------------------------------------------------
 // Project doc support (codex.md)
@@ -462,6 +507,13 @@ export const loadConfig = (
     config.memory = storedConfig.memory;
   }
 
+  // Sau phần cấu hình memory, thêm cấu hình MCP
+  const cwd = options.cwd ?? process.cwd();
+  const mcpConfig = loadMCPConfig(cwd);
+  
+  // Thêm cấu hình MCP vào config
+  config.mcp = mcpConfig;
+
   if (storedConfig.fullAutoErrorMode) {
     config.fullAutoErrorMode = storedConfig.fullAutoErrorMode;
   }
@@ -506,4 +558,27 @@ export const saveConfig = (
   }
 
   writeFileSync(instructionsPath, config.instructions, "utf-8");
+};
+
+// Cập nhật hàm saveConfig để lưu cấu hình MCP
+export const saveMCPConfig = (
+  mcpConfig: MCPConfig,
+  cwd: string = process.cwd(),
+): void => {
+  const mcpConfigPath = MCP_CONFIG_FILEPATH(cwd);
+  
+  try {
+    const dir = dirname(mcpConfigPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    
+    writeFileSync(
+      mcpConfigPath,
+      JSON.stringify(mcpConfig, null, 2),
+      "utf-8"
+    );
+  } catch (error) {
+    console.error(`Error saving MCP config: ${error}`);
+  }
 };
