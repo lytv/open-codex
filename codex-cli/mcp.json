@@ -8,7 +8,7 @@
         "D:\\"
       ]
     },
-    "desktop-commander": {
+    "functions": {
       "command": "npx",
       "args": [
         "-y",
