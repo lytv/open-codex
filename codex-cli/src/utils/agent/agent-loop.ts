@@ -1250,6 +1250,6 @@ export class AgentLoop {
   }
 }
 
-import { updatedPrefix } from "./updated-prompt.js";
+import { updatedPrefix } from "./updated-prompt-cursor-ide.js";
 
 const prefix = updatedPrefix;
