@@ -1,0 +1,18 @@
+{
+  "filesystem": {
+    "id": "dec3f14d-4bc5-4741-a9d0-31b29379a634",
+    "url": "http://localhost:8630"
+  },
+  "functions": {
+    "id": "5dc097f1-5ca4-4e7d-9d3b-a8653b204311",
+    "url": "http://localhost:8470"
+  },
+  "fetch": {
+    "id": "f18854e5-69dc-4d8a-b423-eb656e5f3a86",
+    "url": "http://localhost:8847"
+  },
+  "desktop-commander": {
+    "id": "3ffd1dc5-7475-472a-bb33-c2107a88bdd5",
+    "url": "http://localhost:8374"
+  }
+}

@@ -5,17 +5,10 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "D:\\"
+        "/mnt/d/"
       ]
     },
-    "fetch": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-fetch"
-      ]
-    },
-    "functions": {
+    "desktop-commander": {
       "command": "npx",
       "args": [
         "-y",

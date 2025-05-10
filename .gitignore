@@ -16,7 +16,7 @@ codex-cli/README.md
 .history/
 *.swp
 *~
-
+.codex/
 # cli tools
 CLAUDE.md
 .claude/
